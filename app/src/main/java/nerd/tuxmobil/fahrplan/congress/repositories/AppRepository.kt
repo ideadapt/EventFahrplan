@@ -81,54 +81,44 @@ object AppRepository {
         this.sharedPreferencesRepository = sharedPreferencesRepository
     }
 
+    private val allLecturesUpdater = AllLecturesUpdateProvider(this)
 
-    private val allLecturesUpdateListeners = mutableSetOf<AllLecturesUpdateListener>()
+    fun allLectureUpdater() = allLecturesUpdater
 
-    /**
-     * Listens for any updates to the content of lectures.
-     */
-    interface AllLecturesUpdateListener {
-
-        fun getDayIndex(): Int
-
-        /**
-         * To be invoked when the content of lectures has been updated.
-         */
-        fun onLecturesUpdate(lectures: List<Lecture>)
-    }
-
-    /**
-     * Adds the given [AllLecturesUpdateListener][listener] to an internal collection.
-     */
-    fun addAllLecturesUpdateListener(listener: AllLecturesUpdateListener) {
-        if (allLecturesUpdateListeners.add(listener)) {
-            notifyInitiallyAllLecturesUpdateListener(listener)
-        }
-    }
-
-    /**
-     * Removes the given [AllLecturesUpdateListener][listener] from an internal collection.
-     */
-    fun removeAllLecturesUpdateListener(listener: AllLecturesUpdateListener) {
-        allLecturesUpdateListeners.remove(listener)
-    }
-
-    /**
-     * To be invoked once when the given [listener] is added to the [collection][allLecturesUpdateListeners].
-     */
-    private fun notifyInitiallyAllLecturesUpdateListener(listener: AllLecturesUpdateListener) {
-        allLecturesUpdateListeners.single { it == listener }
-                .onLecturesUpdate(loadUncanceledLecturesForDayIndex(listener.getDayIndex()))
-    }
-
-    /**
-     * To be invoked every time when lectures change.
-     */
-    private fun notifyAllLecturesUpdateListeners() {
-        allLecturesUpdateListeners.forEach { listener ->
-            listener.onLecturesUpdate(loadUncanceledLecturesForDayIndex(listener.getDayIndex()))
-        }
-    }
+//    private val allLecturesUpdateListeners = mutableSetOf<AllLecturesUpdateListener>()
+//
+//    /**
+//     * Adds the given [AllLecturesUpdateListener][listener] to an internal collection.
+//     */
+//    fun addAllLecturesUpdateListener(listener: AllLecturesUpdateListener) {
+//        if (allLecturesUpdateListeners.add(listener)) {
+//            notifyInitiallyAllLecturesUpdateListener(listener)
+//        }
+//    }
+//
+//    /**
+//     * Removes the given [AllLecturesUpdateListener][listener] from an internal collection.
+//     */
+//    fun removeAllLecturesUpdateListener(listener: AllLecturesUpdateListener) {
+//        allLecturesUpdateListeners.remove(listener)
+//    }
+//
+//    /**
+//     * To be invoked once when the given [listener] is added to the [collection][allLecturesUpdateListeners].
+//     */
+//    private fun notifyInitiallyAllLecturesUpdateListener(listener: AllLecturesUpdateListener) {
+//        allLecturesUpdateListeners.single { it == listener }
+//                .onLecturesUpdate(loadUncanceledLecturesForDayIndex(listener.getDayIndex()))
+//    }
+//
+//    /**
+//     * To be invoked every time when lectures change.
+//     */
+//    private fun notifyAllLecturesUpdateListeners() {
+//        allLecturesUpdateListeners.forEach { listener ->
+//            listener.onLecturesUpdate(loadUncanceledLecturesForDayIndex(listener.getDayIndex()))
+//        }
+//    }
 
     private val lecturesChangeListeners = mutableSetOf<LecturesChangeListener>()
 
@@ -519,7 +509,8 @@ object AppRepository {
         val highlightDatabaseModel = lecture.toHighlightDatabaseModel()
         val values = highlightDatabaseModel.toContentValues()
         highlightsDatabaseRepository.update(values, lecture.lectureId)
-        notifyAllLecturesUpdateListeners()
+//        notifyAllLecturesUpdateListeners()
+        allLecturesUpdater.updateAll()
         notifyLectureUpdateListeners(listOf(lecture))
         notifyLecturesChangeListeners()
         notifyStarredLecturesUpdateListeners()
@@ -530,7 +521,8 @@ object AppRepository {
         val values = highlightsDatabaseModel.toContentValues()
         val lectureIds = lectures.map { it.lectureId }
         highlightsDatabaseRepository.update(values, lectureIds)
-        notifyAllLecturesUpdateListeners()
+//        notifyAllLecturesUpdateListeners()
+        allLecturesUpdater.updateAll()
         notifyLectureUpdateListeners(lectures)
         notifyStarredLecturesUpdateListeners()
         notifyLecturesChangeListeners()
@@ -596,7 +588,8 @@ object AppRepository {
         val lecturesDatabaseModel = lectures.toLecturesDatabaseModel()
         val list = lecturesDatabaseModel.map { it.toContentValues() }
         lecturesDatabaseRepository.insert(list)
-        notifyAllLecturesUpdateListeners()
+//        notifyAllLecturesUpdateListeners()
+        allLecturesUpdater.updateAll()
         notifyLectureUpdateListeners(lectures)
         notifyStarredLecturesUpdateListeners()
         notifyLecturesChangeListeners()

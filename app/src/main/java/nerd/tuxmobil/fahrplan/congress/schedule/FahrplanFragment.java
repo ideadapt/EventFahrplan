@@ -61,6 +61,7 @@ import nerd.tuxmobil.fahrplan.congress.models.Lecture;
 import nerd.tuxmobil.fahrplan.congress.net.ParseResult;
 import nerd.tuxmobil.fahrplan.congress.net.ParseScheduleResult;
 import nerd.tuxmobil.fahrplan.congress.net.ParseShiftsResult;
+import nerd.tuxmobil.fahrplan.congress.repositories.AllLecturesUpdateListener;
 import nerd.tuxmobil.fahrplan.congress.repositories.AppRepository;
 import nerd.tuxmobil.fahrplan.congress.sharing.LectureSharer;
 import nerd.tuxmobil.fahrplan.congress.sharing.SimpleLectureFormat;
@@ -155,18 +156,16 @@ public class FahrplanFragment extends Fragment implements OnClickListener {
     private Lecture lastSelectedLecture;
 
     private ObservableType<List<Lecture>> observableLectures = new ObservableType<>();
-    private AppRepository.AllLecturesUpdateListener allLecturesUpdateListener = new AppRepository.AllLecturesUpdateListener() {
-
+    private AllLecturesUpdateListener allLecturesUpdateListener = new AllLecturesUpdateListener() {
         @Override
         public int getDayIndex() {
             return mDay;
         }
 
         @Override
-        public void onLecturesUpdate(@NonNull List<? extends Lecture> lectures) {
+        public void onUpdate(@NonNull List<? extends Lecture> lectures) {
             observableLectures.setValue(new ArrayList<>(lectures));
         }
-
     };
 
     @Override
@@ -264,12 +263,12 @@ public class FahrplanFragment extends Fragment implements OnClickListener {
         if (MyApp.meta.getNumDays() > 1) {
             buildNavigationMenu();
         }
-        appRepository.addAllLecturesUpdateListener(allLecturesUpdateListener);
+        appRepository.allLectureUpdater().add(allLecturesUpdateListener);
     }
 
     @Override
     public void onDestroyView() {
-        appRepository.removeAllLecturesUpdateListener(allLecturesUpdateListener);
+        appRepository.allLectureUpdater().remove(allLecturesUpdateListener);
         super.onDestroyView();
     }
 
@@ -543,8 +542,8 @@ public class FahrplanFragment extends Fragment implements OnClickListener {
             saveCurrentDay(mDay);
             // Register new because the day changed
             // and we are loading data per day.
-            appRepository.removeAllLecturesUpdateListener(allLecturesUpdateListener);
-            appRepository.addAllLecturesUpdateListener(allLecturesUpdateListener);
+            appRepository.allLectureUpdater().remove(allLecturesUpdateListener);
+            appRepository.allLectureUpdater().add(allLecturesUpdateListener);
             fillTimes();
         }
     }
