@@ -21,11 +21,13 @@ class RealSharedPreferencesRepository(val context: Context) : SharedPreferencesR
         const val SCHEDULE_NEXT_FETCH_INTERVAL_DEFAULT_VALUE = -1L
         const val SELECTED_SESSION_ID_KEY = "nerd.tuxmobil.fahrplan.congress.Prefs.SELECTED_SESSION_ID_KEY"
         const val SEARCH_HISTORY_KEY = "nerd.tuxmobil.fahrplan.congress.Prefs.SEARCH_HISTORY_KEY"
+        const val HUB_API_TOKEN_KEY = "nerd.tuxmobil.fahrplan.congress.Prefs.HUB_API_TOKEN"
         const val SEARCH_HISTORY_SEPARATOR = ";"
 
     }
 
-    private val preferences: SharedPreferences = DefaultSettingsRepository.getDefaultSharedPreferences(context.applicationContext)
+    private val preferences: SharedPreferences =
+        DefaultSettingsRepository.getDefaultSharedPreferences(context.applicationContext)
 
     override fun getDisplayDayIndex() = preferences.getInt(DISPLAY_DAY_INDEX_KEY, 1)
 
@@ -39,6 +41,13 @@ class RealSharedPreferencesRepository(val context: Context) : SharedPreferencesR
     override fun setScheduleLastFetchedAt(fetchedAt: Long) = preferences.edit {
         putLong(SCHEDULE_LAST_FETCHED_AT_KEY, fetchedAt)
     }
+
+    override fun setHubApiToken(token: String) = preferences.edit {
+        putString(HUB_API_TOKEN_KEY, token)
+    }
+
+    override fun getHubApiToken() =
+        preferences.getString(HUB_API_TOKEN_KEY, "")!!
 
     override fun getScheduleNextFetchAt() =
             preferences.getLong(SCHEDULE_NEXT_FETCH_AT_KEY, SCHEDULE_NEXT_FETCH_AT_DEFAULT_VALUE)

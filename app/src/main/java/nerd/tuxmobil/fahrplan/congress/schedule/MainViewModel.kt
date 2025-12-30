@@ -14,7 +14,10 @@ import kotlinx.coroutines.launch
 import nerd.tuxmobil.fahrplan.congress.applinks.SlugFactory
 import nerd.tuxmobil.fahrplan.congress.changes.statistic.ChangeStatisticsUiState
 import nerd.tuxmobil.fahrplan.congress.changes.statistic.ChangeStatisticsUiStateFactory
+import nerd.tuxmobil.fahrplan.congress.dataconverters.toSessionAppModel
 import nerd.tuxmobil.fahrplan.congress.dataconverters.toSessionsAppModel
+import nerd.tuxmobil.fahrplan.congress.favorites.models.HubApiToken
+import nerd.tuxmobil.fahrplan.congress.favorites.models.HubApiTokenState
 import nerd.tuxmobil.fahrplan.congress.net.errors.ErrorMessage
 import nerd.tuxmobil.fahrplan.congress.net.errors.ErrorMessage.SimpleMessage
 import nerd.tuxmobil.fahrplan.congress.net.errors.ErrorMessage.TitledMessage
@@ -66,12 +69,16 @@ internal class MainViewModel(
     private val mutableOpenSessionDetails = Channel<Unit>()
     val openSessionDetails = mutableOpenSessionDetails.receiveAsFlow()
 
+    private val mutableHubApiToken = Channel<HubApiTokenState>()
+    val hubApiTokenState = mutableHubApiToken.receiveAsFlow()
+
     private val mutableMissingPostNotificationsPermission = Channel<Unit>()
     val missingPostNotificationsPermission = mutableMissingPostNotificationsPermission.receiveAsFlow()
 
     init {
         observeLoadScheduleState()
         observeEngelsystemUriParsingErrorState()
+        observeHubApiTokenState()
     }
 
     private fun observeLoadScheduleState() {
@@ -91,6 +98,14 @@ internal class MainViewModel(
                     true -> null
                     false -> errorMessageFactory.getMessageForEngelsystemUrlError(errorState)
                 }
+            }
+        }
+    }
+
+    private fun observeHubApiTokenState() {
+        launch {
+            repository.hubApiTokenState.collectLatest { state ->
+                mutableHubApiToken.sendOneTimeEvent(state)
             }
         }
     }
@@ -192,6 +207,24 @@ internal class MainViewModel(
     fun deleteSessionAlarmNotificationId(notificationId: Int) {
         launch {
             repository.deleteSessionAlarmNotificationId(notificationId)
+        }
+    }
+
+    fun fetchHubApiToken(authorizationCode: String, action: String) {
+       repository.fetchHubApiToken(authorizationCode, action)
+    }
+
+    fun syncHubFavorites(hubApiToken: HubApiToken, action: String) {
+        viewModelScope.launch(executionContext.network) {
+            val hubFavSessionGuids = repository.loadHubFavorites(hubApiToken, action).map { it.id }
+            if(hubFavSessionGuids.isNotEmpty()){
+                repository.readSessionsByGuids(hubFavSessionGuids)
+                    .filter { !it.isHighlight }
+                    // TODO hub-sync Consider bulk update, e.g. nerd.tuxmobil.fahrplan.congress.repositories.AppRepository.updateSessions
+                    .forEach { repository.updateHighlight(it.toSessionAppModel().copy(isHighlight = true)) }
+            } else {
+                // No favourite- / starred- / highlight-session found in Hub. Or Hub re-authentication is required and running.
+            }
         }
     }
 

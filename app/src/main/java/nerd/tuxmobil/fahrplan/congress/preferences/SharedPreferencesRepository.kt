@@ -8,6 +8,9 @@ interface SharedPreferencesRepository {
     fun getScheduleLastFetchedAt(): Long
     fun setScheduleLastFetchedAt(fetchedAt: Long)
 
+    fun setHubApiToken(token: String)
+    fun getHubApiToken(): String
+
     fun getScheduleNextFetchAt(): Long
     fun setScheduleNextFetchAt(fetchAt: Long)
     fun resetScheduleNextFetchAt()

@@ -29,6 +29,7 @@ import androidx.fragment.app.FragmentManager.OnBackStackChangedListener
 import androidx.lifecycle.Lifecycle.State.RESUMED
 import info.metadude.android.eventfahrplan.commons.flow.observe
 import info.metadude.android.eventfahrplan.commons.logging.Logging
+import kotlinx.coroutines.DelicateCoroutinesApi
 import nerd.tuxmobil.fahrplan.congress.R
 import nerd.tuxmobil.fahrplan.congress.about.AboutDialog
 import nerd.tuxmobil.fahrplan.congress.alarms.AlarmsActivity
@@ -38,8 +39,9 @@ import nerd.tuxmobil.fahrplan.congress.base.BaseActivity
 import nerd.tuxmobil.fahrplan.congress.base.OnSessionItemClickListener
 import nerd.tuxmobil.fahrplan.congress.changes.ChangeListActivity
 import nerd.tuxmobil.fahrplan.congress.changes.ChangeListFragment
-import nerd.tuxmobil.fahrplan.congress.changes.statistic.ChangeStatisticsUiState
 import nerd.tuxmobil.fahrplan.congress.changes.statistic.ChangeStatisticScreen
+import nerd.tuxmobil.fahrplan.congress.changes.statistic.ChangeStatisticsUiState
+import nerd.tuxmobil.fahrplan.congress.commons.ExternalNavigator
 import nerd.tuxmobil.fahrplan.congress.contract.BundleKeys
 import nerd.tuxmobil.fahrplan.congress.contract.BundleKeys.SCHEDULE_UPDATE_NOTIFICATION
 import nerd.tuxmobil.fahrplan.congress.designsystem.themes.EventFahrplanTheme
@@ -52,6 +54,10 @@ import nerd.tuxmobil.fahrplan.congress.extensions.isLandscape
 import nerd.tuxmobil.fahrplan.congress.extensions.withExtras
 import nerd.tuxmobil.fahrplan.congress.favorites.StarredListActivity
 import nerd.tuxmobil.fahrplan.congress.favorites.StarredListFragment
+import nerd.tuxmobil.fahrplan.congress.favorites.models.HUB_ACTION_FAV_SYNC
+import nerd.tuxmobil.fahrplan.congress.favorites.models.HubApiTokenRequiresAuthState
+import nerd.tuxmobil.fahrplan.congress.favorites.models.HubApiTokenState
+import nerd.tuxmobil.fahrplan.congress.favorites.models.HubApiTokenValidState
 import nerd.tuxmobil.fahrplan.congress.net.errors.ErrorMessage
 import nerd.tuxmobil.fahrplan.congress.net.errors.ErrorMessage.TitledMessage
 import nerd.tuxmobil.fahrplan.congress.net.errors.ErrorMessageScreen
@@ -236,6 +242,38 @@ class MainActivity : BaseActivity(),
         viewModel.missingPostNotificationsPermission.observe(this) {
             Toast.makeText(this, R.string.alarms_disabled_notifications_permission_missing, Toast.LENGTH_LONG).show()
         }
+
+        viewModel.hubApiTokenState.observe(this) { newState ->
+            handleHubApiTokenStateChanged(newState)
+        }
+    }
+
+    private fun handleHubApiTokenStateChanged(newState: HubApiTokenState) {
+        when (newState) {
+            is HubApiTokenValidState -> {
+                if (newState.action == HUB_ACTION_FAV_SYNC) {
+                    // TODO hub-sync If we have just authenticated via browser,
+                    //  the main activity is shown instead of favorites fragments.
+                    viewModel.syncHubFavorites(newState.token, HUB_ACTION_FAV_SYNC)
+                } else {
+                    logging.e(LOG_TAG, "Unknown action in HubApiTokenState: '${newState.action}'")
+                }
+            }
+
+            is HubApiTokenRequiresAuthState -> {
+                val navigator = ExternalNavigator(applicationContext)
+                navigator.openLink(
+                    "https://api.events.ccc.de/congress/2025/identity/o/authorize" +
+                            "?client_id=0ae48f45857c49e1858ff6f249e6a21e" +
+                            "&redirect_uri=https://metadude.uber.space/oauth/callback" +
+                            "&response_type=code" +
+                            "&code_challenge_method=S256" +
+                            "&code_challenge=${newState.codeChallenge}" +
+                            "&state=${newState.action}" +
+                            "&scope=openid"
+                )
+            }
+        }
     }
 
     private fun updateUi(uiState: LoadScheduleUiState) {
@@ -251,6 +289,7 @@ class MainActivity : BaseActivity(),
         }
     }
 
+    @OptIn(DelicateCoroutinesApi::class)
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
@@ -260,9 +299,35 @@ class MainActivity : BaseActivity(),
             append("isScheduleUpdate=${intent.getBooleanExtra(SCHEDULE_UPDATE_NOTIFICATION, false)}, ")
             append("isSessionAlarm=${intent.getStringExtra(BundleKeys.SESSION_ALARM_SESSION_ID) != null}")
         })
+
+        onOAuthCallback(intent)
         onSessionAlarmNotificationTapped(intent)
         onScheduleUpdateNotificationTapped(intent)
         handleAppLink(intent)
+    }
+
+    private fun onOAuthCallback(intent: Intent) {
+        try {
+            val uri = intent.data
+            if (uri != null && intent.action == Intent.ACTION_VIEW) {
+                val matchesCustomScheme =
+                    uri.toString().startsWith("info.metadude.android.congress.schedule://oauth")
+                if (matchesCustomScheme) {
+                    val oauthAuthorizationCode = uri.getQueryParameter("code")
+                        ?: throw IllegalStateException("Retrieved OAuth callback URI must contain a 'code' parameter.")
+                    val state = uri.getQueryParameter("state")
+                        ?: throw IllegalStateException("Retrieved OAuth callback URI must contain a 'state' parameter.")
+
+                    if(oauthAuthorizationCode.isNotEmpty()){
+                        viewModel.fetchHubApiToken(oauthAuthorizationCode, state)
+                    } else {
+                        logging.d(LOG_TAG, "Retrieved OAuth callback has an empty 'code' parameter, the user rejected the request.")
+                    }
+                }
+            }
+        } catch (ex: Throwable) {
+            logging.e(LOG_TAG, "Error handling OAuth callback URI: $ex")
+        }
     }
 
     private fun onSessionAlarmNotificationTapped(intent: Intent) {

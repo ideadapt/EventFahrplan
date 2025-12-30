@@ -38,12 +38,15 @@ import nerd.tuxmobil.fahrplan.congress.extensions.applyHorizontalInsets
 import nerd.tuxmobil.fahrplan.congress.extensions.replaceFragment
 import nerd.tuxmobil.fahrplan.congress.extensions.requireViewByIdCompat
 import nerd.tuxmobil.fahrplan.congress.extensions.withArguments
+import nerd.tuxmobil.fahrplan.congress.favorites.models.HUB_ACTION_FAV_SYNC
 import nerd.tuxmobil.fahrplan.congress.models.Session
+import nerd.tuxmobil.fahrplan.congress.schedule.MainViewModel
 import nerd.tuxmobil.fahrplan.congress.sharing.SessionSharer
 import nerd.tuxmobil.fahrplan.congress.utils.ActivityHelper.navigateUp
 import nerd.tuxmobil.fahrplan.congress.utils.ConfirmationDialog
 import nerd.tuxmobil.fahrplan.congress.utils.ContentDescriptionFormatter
 import nerd.tuxmobil.fahrplan.congress.utils.SessionPropertiesFormatter
+
 
 /**
  * A fragment representing a list of Items.
@@ -155,6 +158,9 @@ class StarredListFragment :
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+
+        viewModel.runWithHubSession(HUB_ACTION_FAV_SYNC)
+
         observeViewModel()
     }
 

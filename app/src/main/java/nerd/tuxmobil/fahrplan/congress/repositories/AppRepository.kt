@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import androidx.annotation.VisibleForTesting
 import androidx.annotation.WorkerThread
+import com.squareup.moshi.Moshi
 import info.metadude.android.eventfahrplan.commons.extensions.onFailure
 import info.metadude.android.eventfahrplan.commons.logging.Logging
 import info.metadude.android.eventfahrplan.commons.temporal.Duration
@@ -32,6 +33,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.onStart
@@ -61,6 +63,14 @@ import nerd.tuxmobil.fahrplan.congress.details.SessionDetailsRepository
 import nerd.tuxmobil.fahrplan.congress.engelsystem.EngelsystemUriParser
 import nerd.tuxmobil.fahrplan.congress.engelsystem.EngelsystemUriParsingResult
 import nerd.tuxmobil.fahrplan.congress.exceptions.AppExceptionHandler
+import nerd.tuxmobil.fahrplan.congress.favorites.models.HubEventsDto
+import nerd.tuxmobil.fahrplan.congress.favorites.models.HubOAuthTokenDto
+import nerd.tuxmobil.fahrplan.congress.favorites.models.HubApiToken
+import nerd.tuxmobil.fahrplan.congress.favorites.models.HubApiTokenState
+import nerd.tuxmobil.fahrplan.congress.favorites.models.HubApiTokenRequiresAuthState
+import nerd.tuxmobil.fahrplan.congress.favorites.models.HubApiTokenValidState
+import nerd.tuxmobil.fahrplan.congress.favorites.models.HubEventDto
+ import nerd.tuxmobil.fahrplan.congress.favorites.models.UNAUTHENTICATED_TOKEN
 import nerd.tuxmobil.fahrplan.congress.models.Alarm
 import nerd.tuxmobil.fahrplan.congress.models.ConferenceTimeFrame
 import nerd.tuxmobil.fahrplan.congress.models.ConferenceTimeFrame.Known
@@ -90,7 +100,15 @@ import nerd.tuxmobil.fahrplan.congress.schedule.FahrplanViewModel
 import nerd.tuxmobil.fahrplan.congress.search.SearchRepository
 import nerd.tuxmobil.fahrplan.congress.serialization.ScheduleChanges.Companion.computeSessionsWithChangeFlags
 import nerd.tuxmobil.fahrplan.congress.validation.MetaValidation.validate
+import okhttp3.FormBody
 import okhttp3.OkHttpClient
+import okhttp3.Request
+import java.io.IOException
+import java.lang.IllegalStateException
+import java.net.URL
+import java.security.MessageDigest
+import java.security.NoSuchAlgorithmException
+import java.security.SecureRandom
 import info.metadude.android.eventfahrplan.database.models.Meta as MetaDatabaseModel
 import info.metadude.android.eventfahrplan.database.models.Session as SessionDatabaseModel
 import info.metadude.android.eventfahrplan.network.models.HttpHeader as HttpHeaderNetworkModel
@@ -137,6 +155,19 @@ object AppRepository : SearchRepository,
     private lateinit var settingsRepository: SettingsRepository
     private lateinit var roomStatesRepository: RoomStatesRepository
     private lateinit var sessionsTransformer: SessionsTransformer
+
+//    private val mutableHubApiCodeVerifierState = MutableSharedFlow<String>(
+//        replay = 1,
+//        onBufferOverflow = BufferOverflow.DROP_OLDEST
+//    )
+//    val oAuthCodeVerifierState: Flow<String> = mutableHubApiCodeVerifierState
+    var hubApiCodeVerifier: String? = null
+
+    private val mutableHubApiTokenState = MutableSharedFlow<HubApiTokenState>(
+        replay = 1,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST
+    )
+    val hubApiTokenState: Flow<HubApiTokenState> = mutableHubApiTokenState
 
     private val mutableLoadScheduleState = MutableSharedFlow<LoadScheduleState>(
         replay = 1,
@@ -469,6 +500,189 @@ object AppRepository : SearchRepository,
         parentJobs.clear()
         jobs.forEach(Job::cancel)
     }
+
+    // START hub operations
+
+    fun runWithHubSession(action: String) {
+        val token = getHubApiToken()
+        if (token.isValidNow()) {
+            logging.d(LOG_TAG, "hub token ${token.accessToken.take(6)} valid for action $action")
+            updateHubApiTokenState(HubApiTokenValidState(token, action))
+        } else if (token.canRefresh()) {
+            logging.d(LOG_TAG, "hub token ${token.accessToken.take(6)} needs refresh for action $action")
+            refreshHubApiToken(token, action)
+        } else {
+            logging.d(LOG_TAG, "hub action $action needs login, no valid token stored on device")
+            val codeVerifier = secureRandomUrlSafe()
+            val codeChallenge = hashUrlSafe(codeVerifier)
+            updateVerifier(codeVerifier)
+            updateHubApiTokenState(HubApiTokenRequiresAuthState(action, codeChallenge))
+        }
+    }
+
+    const val HUB_API_ROOT = "https://api.events.ccc.de"
+    //const val HUB_API_ROOT = "https://whnrgn-ip-193-5-235-234.tunnelmole.net"
+
+    private fun refreshHubApiToken(expiredToken: HubApiToken, action: String) {
+        val requestIdentifier = "refreshHubApiToken"
+        parentJobs[requestIdentifier] = networkScope.launchNamed(requestIdentifier) {
+            flow {
+                val newHubApiTokenDto = okHttpClient.newCall(Request.Builder().apply {
+                    url(URL("$HUB_API_ROOT/congress/2025/identity/o/api/token"))
+                    header("Accept", "application/json")
+                    post(
+                        FormBody.Builder()
+                            .addEncoded("refresh_token", expiredToken.refreshToken)
+                            .addEncoded("client_id", "0ae48f45857c49e1858ff6f249e6a21e")
+                            // TODO hub-sync Store client_secret securely https://developers.google.com/identity/protocols/oauth2/resources/best-practices
+                            // client_secret must not be encoded!
+                            .add(
+                                "client_secret",
+                                "..."
+                            )
+                            .addEncoded("grant_type", "refresh_token")
+                            .build()
+                    )
+                }.build()).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        if (response.code == 401) { // Unauthorized
+                            logging.d(LOG_TAG, "hub token refresh response 401, trying to re-login.")
+                            updateHubApiToken(UNAUTHENTICATED_TOKEN)
+                            runWithHubSession(action)
+                        } else {
+                            logging.e(LOG_TAG, response.body.string())
+                            throw IOException("Unexpected Hub API response: $response.")
+                        }
+                    }
+                    val moshi = Moshi.Builder().build()
+                    val jsonAdapter by lazy { moshi.adapter(HubOAuthTokenDto::class.java) }
+
+                    val dto = jsonAdapter.fromJson(response.body.source())!!
+                    dto.copy(createdAt = Moment.now().toMilliseconds())
+                }
+                emit(newHubApiTokenDto)
+            }.collectLatest { newHubApiTokenDto ->
+                // token is usually valid for 1 hour
+                updateHubApiToken(newHubApiTokenDto)
+                val token = getHubApiToken()
+                updateHubApiTokenState(HubApiTokenValidState(token, action))
+            }
+        }
+    }
+
+    fun fetchHubApiToken(authorizationCode: String, action: String) {
+        val requestIdentifier = "fetchHubApiToken"
+        val verifier = hubApiCodeVerifier ?: throw IllegalStateException("No Hub API code verifier set.")
+        parentJobs[requestIdentifier] = networkScope.launchNamed(requestIdentifier) {
+            flow {
+                val newHubApiTokenDto = okHttpClient.newCall(Request.Builder().apply {
+                    url(URL("$HUB_API_ROOT/congress/2025/identity/o/api/token"))
+                    header("Accept", "application/json")
+                    post(
+                        FormBody.Builder()
+                            .addEncoded("code", authorizationCode)
+                            .addEncoded("client_id", "0ae48f45857c49e1858ff6f249e6a21e")
+                            .addEncoded("grant_type", "authorization_code")
+                            .addEncoded("code_verifier", verifier)
+                            .addEncoded("scope", "openid")
+                            .addEncoded("redirect_uri", "https://metadude.uber.space/oauth/callback")
+                            .build()
+                    )
+                }.build()).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        logging.e(LOG_TAG, response.body.string())
+                        throw IOException("Unexpected Hub API response: $response.")
+                    }
+                    val moshi = Moshi.Builder().build()
+                    val jsonAdapter by lazy { moshi.adapter(HubOAuthTokenDto::class.java) }
+
+                    val dto = jsonAdapter.fromJson(response.body.source())!!
+                    dto.copy(createdAt = Moment.now().toMilliseconds())
+                }
+                emit(newHubApiTokenDto)
+            }.collectLatest { newHubApiTokenDto ->
+                // token is usually valid for 1 hour
+                updateHubApiToken(newHubApiTokenDto)
+                val token = getHubApiToken()
+                updateHubApiTokenState(HubApiTokenValidState(token, action))
+            }
+        }
+    }
+
+    private fun secureRandomUrlSafe(size: Int = 32): String {
+        val secureRandom = SecureRandom()
+        val codeVerifier = ByteArray(size)
+        secureRandom.nextBytes(codeVerifier)
+        return kotlin.io.encoding.Base64.UrlSafe.encode(codeVerifier).replace("=", "")
+    }
+
+    @Throws(NoSuchAlgorithmException::class)
+    private fun hashUrlSafe(secret: String): String {
+        val bytes = secret.toByteArray(charset("UTF-8"))
+        val messageDigest = MessageDigest.getInstance("SHA-256")
+        messageDigest.update(bytes, 0, bytes.size)
+        val digest = messageDigest.digest()
+        return kotlin.io.encoding.Base64.UrlSafe.encode(digest).replace("=", "")
+    }
+
+    private fun updateHubApiToken(token: HubOAuthTokenDto){
+        val moshi = Moshi.Builder().build()
+        val jsonAdapter by lazy { moshi.adapter(HubOAuthTokenDto::class.java) }
+
+        // TODO hub-sync Migrate to be encrypted (https://developer.android.com/reference/androidx/security/crypto/EncryptedSharedPreferences is deprecated)
+        //  use e.g. https://proandroiddev.com/goodbye-encryptedsharedpreferences-a-2026-migration-guide-4b819b4a537a
+        //  encryption is required because we store the refresh_token
+        sharedPreferencesRepository.setHubApiToken(jsonAdapter.toJson(token))
+    }
+
+    private fun updateVerifier(verifier: String){
+        hubApiCodeVerifier = verifier
+    }
+
+    private fun updateHubApiTokenState(state: HubApiTokenState){
+        mutableHubApiTokenState.tryEmit(state)
+    }
+
+    private fun getHubApiToken(): HubApiToken {
+        val moshi = Moshi.Builder().build()
+        val jsonAdapter by lazy { moshi.adapter(HubOAuthTokenDto::class.java) }
+        val storedTokenJson = sharedPreferencesRepository.getHubApiToken()
+        return if(storedTokenJson.isNotEmpty()){
+            HubApiToken(jsonAdapter.fromJson(storedTokenJson)!!)
+        } else {
+            HubApiToken(UNAUTHENTICATED_TOKEN)
+        }
+    }
+
+    fun loadHubFavorites(hubApiToken: HubApiToken, action: String): List<HubEventDto> {
+        val accessToken = hubApiToken.accessToken
+        val resp = okHttpClient.newCall(Request.Builder().apply {
+            url(URL("$HUB_API_ROOT/congress/2025/v2/events/?favorited=1"))
+            header("Accept", "application/json")
+            header("Authorization", "Bearer $accessToken")
+        }.build()).execute().use { response ->
+            if (!response.isSuccessful) {
+                if (response.code == 401) { // Unauthorized
+                    updateHubApiToken(UNAUTHENTICATED_TOKEN)
+                    logging.d(LOG_TAG, "hub token response 401 (unauthorized), trying to re-login.")
+                    runWithHubSession(action)
+                    return emptyList()
+                } else {
+                    logging.e(LOG_TAG, response.body.string())
+                    throw IOException("Unexpected Hub API response: $response.")
+                }
+            } else {
+                val moshi = Moshi.Builder().build()
+                val jsonAdapter by lazy { moshi.adapter(HubEventsDto::class.java) }
+
+                jsonAdapter.fromJson(response.body.source())!!
+            }
+        }
+        logging.d(LOG_TAG, "Found ${resp.data.size} favorited events in hub.")
+        return resp.data
+    }
+
+    // END hub operations
 
     /**
      * Loads the schedule from the given [url]. Automated calls to this function must set the
@@ -911,6 +1125,12 @@ object AppRepository : SearchRepository,
             refreshRoomStates()
             refreshUncanceledSessions()
         }
+    }
+
+    fun readSessionsByGuids(hubFavSessionGuids: List<String>): List<SessionDatabaseModel> {
+        return sessionsDatabaseRepository
+            .querySessionsByGuids(hubFavSessionGuids)
+            .map(::enrichSession)
     }
 
     private fun readSessionBySessionId(sessionId: String): SessionDatabaseModel {
