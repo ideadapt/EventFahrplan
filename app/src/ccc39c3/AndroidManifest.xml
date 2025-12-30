@@ -15,18 +15,52 @@
                 <category android:name="android.intent.category.BROWSABLE" />
 
                 <data android:scheme="https" />
-
                 <!-- fahrplan.events.ccc.de patterns -->
                 <data android:host="fahrplan.events.ccc.de" />
                 <data android:pathPattern="/congress/.*/fahrplan/talk/.*" />
                 <data android:pathPattern="/congress/.*/fahrplan/event/.*" />
+            </intent-filter>
 
+
+            <intent-filter
+                android:autoVerify="true"
+                tools:targetApi="23">
+                <action android:name="android.intent.action.VIEW" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <data android:scheme="https" />
                 <!-- events.ccc.de patterns -->
                 <data android:host="events.ccc.de" />
                 <data android:pathPattern="/congress/.*/hub/.*/event/.*" />
                 <data android:pathPattern="/congress/.*/hub/.*/event/detail/.*" />
                 <data android:pathPattern="/congress/.*/hub/event/.*" />
                 <data android:pathPattern="/congress/.*/hub/event/detail/.*" />
+            </intent-filter>
+
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <!--
+                required for CCC Event Hub API v2 OAuth integration via authorization code flow
+                the redirect URL used in the OAuth flow is "https://metadude.uber.space/oauth/callback",
+                which redirects to "info.metadude.android.congress.schedule://oauth" (preserving query parameters during redirect).
+                a working .htaccess is:
+
+                ```
+                RewriteEngine On
+                RewriteCond %{QUERY_STRING} ^code=
+                RedirectMatch 302 ^/oauth/callback$ info.metadude.android.congress.schedule://oauth
+                ```
+
+                API docs at https://api.events.ccc.de/congress/2025/v2/docs
+                -->
+                <data android:scheme="info.metadude.android.congress.schedule" />
+                <data android:host="oauth" />
             </intent-filter>
         </activity>
     </application>

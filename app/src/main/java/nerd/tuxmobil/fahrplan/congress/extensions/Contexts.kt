@@ -79,8 +79,10 @@ fun Context.openLinkWithApp(link: String, packageName: String) {
 fun Context.openLink(link: String) {
     val intent = Intent(Intent.ACTION_VIEW, link.toUri())
     intent.addCategory(Intent.CATEGORY_BROWSABLE)   // required
-    intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     val chooser = Intent.createChooser(intent, "Open with")
+        // required, since intent flags are not inherited to chooser.
+        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     startActivity(chooser)
 }
 

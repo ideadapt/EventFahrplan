@@ -23,6 +23,7 @@ interface SessionsDatabaseRepository {
     )
 
     fun querySessionBySessionId(sessionId: String): Session
+    fun querySessionsByGuids(guids: List<String>): List<Session>
     fun querySessionsBySlugInFeedbackUrl(slug: String): List<Session>
     fun querySessionsBySlugInSlug(slug: String): List<Session>
     fun querySessionsForDayIndexOrderedByDateUtc(dayIndex: Int): List<Session>

@@ -75,6 +75,10 @@ class StarredListViewModel(
         }
     }
 
+    fun runWithHubSession(action: String) {
+        repository.runWithHubSession(action)
+    }
+
     private fun List<Session>.toStarredListParameter(): StarredListParameter {
         val numDays = if (isEmpty()) 0 else repository.readMeta().numDays
         val useDeviceTimeZone = isNotEmpty() && repository.readUseDeviceTimeZoneEnabled()
