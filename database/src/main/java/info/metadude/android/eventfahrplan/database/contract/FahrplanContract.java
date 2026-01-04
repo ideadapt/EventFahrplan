@@ -89,6 +89,7 @@ public interface FahrplanContract {
         interface Columns extends BaseColumns {
 
             /* 00 */ String SESSION_ID = "event_id"; // Keep column name to avoid database migration.
+            /* 00 */ String SESSION_GUID = "event_guid"; // Keep column name to avoid database migration.
             /* 01 */ String TITLE = "title";
             /* 02 */ String SUBTITLE = "subtitle";
             /* 03 */ String DAY_INDEX = "day";
