@@ -277,6 +277,7 @@ internal class RealSessionsDatabaseRepository(
 
             Session(
                     sessionId = cursor.getString(SESSION_ID),
+                    sessionGuid = cursor.getStringOrNull(SESSION_GUID),
                     abstractt = cursor.getString(ABSTRACT),
                     dateText = cursor.getString(DATE_TEXT),
                     dateUTC = cursor.getLong(DATE_UTC),

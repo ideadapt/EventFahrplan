@@ -40,6 +40,7 @@ import info.metadude.android.eventfahrplan.database.contract.FahrplanContract.Se
 import info.metadude.android.eventfahrplan.database.models.Session
 import org.junit.jupiter.api.Test
 import info.metadude.android.eventfahrplan.commons.temporal.Duration
+import info.metadude.android.eventfahrplan.database.contract.FahrplanContract.SessionsTable.Columns.SESSION_GUID
 
 class SessionExtensionsTest {
 
@@ -47,6 +48,7 @@ class SessionExtensionsTest {
     fun toContentValues() {
         val session = Session(
                 sessionId = "7331",
+                sessionGuid = "42",
                 abstractt = "Lorem ipsum",
                 dayIndex = 3,
                 dateText = "2015-08-13",
@@ -88,6 +90,7 @@ class SessionExtensionsTest {
         )
         val values = session.toContentValues()
         assertThat(values.getAsInteger(SESSION_ID)).isEqualTo(7331)
+        assertThat(values.getAsString(SESSION_GUID)).isEqualTo("42")
         assertThat(values.getAsString(ABSTRACT)).isEqualTo("Lorem ipsum")
         assertThat(values.getAsInteger(DAY_INDEX)).isEqualTo(3)
         assertThat(values.getAsString(DATE_TEXT)).isEqualTo("2015-08-13")
